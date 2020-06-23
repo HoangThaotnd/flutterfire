@@ -226,11 +226,14 @@ static NSObject<FlutterPluginRegistrar> *_registrar;
 #endif
 
 - (void)didReceiveRemoteNotification:(NSDictionary *)userInfo {
-  if (_resumingFromBackground) {
-    [_channel invokeMethod:@"onResume" arguments:userInfo];
-  } else {
-    [_channel invokeMethod:@"onMessage" arguments:userInfo];
-  }
+     if (@available(iOS 10.0, *)) {
+   }else{
+      if (_resumingFromBackground) {
+        [_channel invokeMethod:@"onResume" arguments:userInfo];
+      } else {
+        [_channel invokeMethod:@"onMessage" arguments:userInfo];
+      }
+   }
 }
 
 #pragma mark - AppDelegate
