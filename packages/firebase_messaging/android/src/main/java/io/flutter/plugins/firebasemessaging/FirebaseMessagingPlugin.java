@@ -123,7 +123,10 @@ public class FirebaseMessagingPlugin extends BroadcastReceiver
       RemoteMessage message =
           intent.getParcelableExtra(FlutterFirebaseMessagingService.EXTRA_REMOTE_MESSAGE);
       Map<String, Object> content = parseRemoteMessage(message);
-      channel.invokeMethod("onMessage", content);
+      Map<String, Object> notificationMap = (Map<String, Object>) content.get("notification");
+      if(notificationMap.get("title")!= null && notificationMap.get("body") != null){
+        channel.invokeMethod("onMessage", content);
+      }
     }
   }
 
