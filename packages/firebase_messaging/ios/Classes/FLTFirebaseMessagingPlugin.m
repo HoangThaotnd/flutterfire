@@ -10,6 +10,8 @@
 
 NSString *const kGCMMessageIDKey = @"gcm.message_id";
 
+NSMutableArray *currentNotifications;
+
 #if defined(__IPHONE_10_0) && __IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_10_0
 @interface FLTFirebaseMessagingPlugin () <FIRMessagingDelegate>
 @end
@@ -32,6 +34,7 @@ static NSObject<FlutterPluginRegistrar> *_registrar;
 
 + (void)registerWithRegistrar:(NSObject<FlutterPluginRegistrar> *)registrar {
   _registrar = registrar;
+    currentNotifications = [[NSMutableArray alloc] init];
   FlutterMethodChannel *channel =
       [FlutterMethodChannel methodChannelWithName:@"plugins.flutter.io/firebase_messaging"
                                   binaryMessenger:[registrar messenger]];
@@ -63,7 +66,7 @@ static NSObject<FlutterPluginRegistrar> *_registrar;
 }
 
 - (void)handleMethodCall:(FlutterMethodCall *)call result:(FlutterResult)result {
-  NSString *method = call.method;
+   NSString *method = call.method;
   if ([@"requestNotificationPermissions" isEqualToString:method]) {
     NSDictionary *arguments = call.arguments;
     if (@available(iOS 10.0, *)) {
@@ -204,6 +207,9 @@ static NSObject<FlutterPluginRegistrar> *_registrar;
          withCompletionHandler:(void (^)(UNNotificationPresentationOptions))completionHandler
     NS_AVAILABLE_IOS(10.0) {
   NSDictionary *userInfo = notification.request.content.userInfo;
+    
+    
+    
   // Check to key to ensure we only handle messages from Firebase
   if (userInfo[kGCMMessageIDKey]) {
     [[FIRMessaging messaging] appDidReceiveMessage:userInfo];
@@ -216,6 +222,8 @@ static NSObject<FlutterPluginRegistrar> *_registrar;
     didReceiveNotificationResponse:(UNNotificationResponse *)response
              withCompletionHandler:(void (^)(void))completionHandler NS_AVAILABLE_IOS(10.0) {
   NSDictionary *userInfo = response.notification.request.content.userInfo;
+
+        
   // Check to key to ensure we only handle messages from Firebase
   if (userInfo[kGCMMessageIDKey]) {
     [_channel invokeMethod:@"onResume" arguments:userInfo];
@@ -223,9 +231,104 @@ static NSObject<FlutterPluginRegistrar> *_registrar;
   }
 }
 
+
+- (NSArray*) getDeliveredNotifications
+{
+    NSMutableArray* notifications = [[NSMutableArray alloc] init];
+    dispatch_semaphore_t sema = dispatch_semaphore_create(0);
+
+    [[UNUserNotificationCenter currentNotificationCenter] getDeliveredNotificationsWithCompletionHandler:^(NSArray<UNNotification *> *delivered) {
+        for (UNNotification* notification in delivered)
+        {
+            [notifications addObject:notification.request];
+        }
+        dispatch_semaphore_signal(sema);
+    }];
+
+    dispatch_semaphore_wait(sema, DISPATCH_TIME_FOREVER);
+
+    return notifications;
+}
+
+- (NSArray*) getPendingNotifications
+{
+    NSMutableArray* notifications = [[NSMutableArray alloc] init];
+    dispatch_semaphore_t sema = dispatch_semaphore_create(0);
+
+    [[UNUserNotificationCenter currentNotificationCenter] getPendingNotificationRequestsWithCompletionHandler:^(NSArray<UNNotificationRequest *> *requests) {
+        [notifications addObjectsFromArray:requests];
+        dispatch_semaphore_signal(sema);
+    }];
+
+    dispatch_semaphore_wait(sema, DISPATCH_TIME_FOREVER);
+
+    return notifications;
+}
+- (NSArray*) getNotifications
+{
+    NSMutableArray* notifications = [[NSMutableArray alloc] init];
+
+    [notifications addObjectsFromArray:[self getPendingNotifications]];
+    [notifications addObjectsFromArray:[self getDeliveredNotifications]];
+
+    return notifications;
+}
+
+- (UNNotificationRequest*) getNotificationWithId:(NSNumber*)id
+{
+    NSArray* notifications = [self getNotifications];
+
+    for (UNNotificationRequest* notification in notifications)
+    {
+        NSString* fid = [NSString stringWithFormat:@"%@",[notification.content.userInfo objectForKey:@"gcm.notification.id" ]];
+        
+        if ([fid isEqualToString:[id stringValue]]) {
+            return notification;
+        }
+    }
+    
+    return NULL;
+}
+
+- (void) clearNotification:(UNNotificationRequest*)toast
+{
+    [[UNUserNotificationCenter currentNotificationCenter] removeDeliveredNotificationsWithIdentifiers:@[toast.identifier]];
+}
+
+- (void) cancelNotification:(UNNotificationRequest*)toast
+{
+    NSArray* ids = @[toast.identifier];
+                    
+    [[UNUserNotificationCenter currentNotificationCenter] removeDeliveredNotificationsWithIdentifiers:ids];
+    [[UNUserNotificationCenter currentNotificationCenter] removePendingNotificationRequestsWithIdentifiers:ids];
+}
+
+
 #endif
 
 - (void)didReceiveRemoteNotification:(NSDictionary *)userInfo {
+    
+    NSString * jsonString = [userInfo objectForKey:@"notification_info"];
+    NSData *data = [jsonString dataUsingEncoding:NSUTF8StringEncoding];
+   
+    NSNumber * idNotification = [[NSJSONSerialization JSONObjectWithData:data options:0 error:nil] objectForKey:@"notification_id"];
+    
+    NSArray* deliveredNotifications = [self getDeliveredNotifications];
+    
+    NSLog(@"getDeliveredNotificationsWithCompletionHandler count %lu", (unsigned long)[deliveredNotifications count]);
+   
+   
+    if(![[userInfo objectForKey:@"click_action"]  isEqual: @"FLUTTER_NOTIFICATION_CLICK"]){
+        
+        UNNotificationRequest* notification = [self getNotificationWithId:idNotification];
+
+        if (notification) {
+            [self clearNotification: notification];
+        }
+     
+        NSLog(@"getDeliveredNotificationsWithCompletionHandler count after remove %lu", (unsigned long)[[self getDeliveredNotifications] count]);
+    }
+
      if (@available(iOS 10.0, *)) {
    }else{
       if (_resumingFromBackground) {
